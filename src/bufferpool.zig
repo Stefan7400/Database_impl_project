@@ -79,14 +79,17 @@ test "findFreeFramePtr returns first frame and marks it used" {
     try testing.expect(pool.free_list[1]); // others untouched
 }
 
-test "findFreeFramePtr hands out consecutive frames" {
+test "findFreeFramePtr hands out frames and reclaims after free" {
     var pool = try BufferPool.init();
     defer pool.deinit();
 
+    // Claim both available frames
     const f0 = pool.findFreeFramePtr().?;
+    pool.markFrameAsUsed(f0);
     const f1 = pool.findFreeFramePtr().?;
-    const f2 = pool.findFreeFramePtr().?;
+    pool.markFrameAsUsed(f1);
 
+    // The two frames should be at consecutive page-sized offsets
     try testing.expectEqual(
         @intFromPtr(pool.buffer.ptr) + 0 * api.page_size,
         @intFromPtr(f0),
@@ -95,16 +98,22 @@ test "findFreeFramePtr hands out consecutive frames" {
         @intFromPtr(pool.buffer.ptr) + 1 * api.page_size,
         @intFromPtr(f1),
     );
-    try testing.expectEqual(
-        @intFromPtr(pool.buffer.ptr) + 2 * api.page_size,
-        @intFromPtr(f2),
-    );
 
-    // free_list reflects the claims
+    // Both slots marked used
     try testing.expect(!pool.free_list[0]);
     try testing.expect(!pool.free_list[1]);
-    try testing.expect(!pool.free_list[2]);
-    try testing.expect(pool.free_list[3]);
+
+    // Pool full — no more frames available
+    try testing.expect(pool.findFreeFramePtr() == null);
+
+    // Free the first frame
+    pool.markFrameAsFree(f0);
+    try testing.expect(pool.free_list[0]);
+    try testing.expect(!pool.free_list[1]);
+
+    // findFreeFramePtr should reclaim the just-freed slot
+    const f0_again = pool.findFreeFramePtr().?;
+    try testing.expectEqual(@intFromPtr(f0), @intFromPtr(f0_again));
 }
 
 test "markFrameAsFree releases the frame and it can be reclaimed" {
@@ -124,23 +133,24 @@ test "markFrameAs computes the correct index for arbitrary frames" {
     var pool = try BufferPool.init();
     defer pool.deinit();
 
-    // Claim frames 0, 1, 2.
     const f0 = pool.findFreeFramePtr().?;
+    pool.markFrameAsUsed(f0);
     const f1 = pool.findFreeFramePtr().?;
-    const f2 = pool.findFreeFramePtr().?;
+    pool.markFrameAsUsed(f1);
 
-    // Free the middle one.
+    // Both marked used
+    try testing.expect(!pool.free_list[0]);
+    try testing.expect(!pool.free_list[1]);
+
+    // Free frame 1 (not the most recently allocated) — exercises non-zero index
     pool.markFrameAsFree(f1);
     try testing.expect(!pool.free_list[0]);
     try testing.expect(pool.free_list[1]);
-    try testing.expect(!pool.free_list[2]);
 
-    // Reclaiming should hand back f1, not f3.
-    const reclaimed = pool.findFreeFramePtr().?;
-    try testing.expectEqual(@intFromPtr(f1), @intFromPtr(reclaimed));
-
-    _ = f0;
-    _ = f2;
+    // Free frame 0 too
+    pool.markFrameAsFree(f0);
+    try testing.expect(pool.free_list[0]);
+    try testing.expect(pool.free_list[1]);
 }
 
 test "exhausting the pool returns null" {

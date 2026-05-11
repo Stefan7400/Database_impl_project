@@ -35,9 +35,9 @@ pub const PageTable = struct {
     }
 
     pub fn findEvictableFrame(self : *PageTable) EvictResult {
-        const iter = self.table.iterator();
+        var iter = self.table.iterator();
         while(iter.next()) |e| {
-            if(e.value_ptr.pin_count == 0) {
+            if(e.value_ptr.pin_count != 0) {
                 continue;
             }
 
@@ -48,7 +48,7 @@ pub const PageTable = struct {
             };
         }
 
-        @panic("Eviction not possible bc no entry_pin_count != 0");
+        @panic("Eviction not possible bc no entry_pin_count == 0");
     }
 
 
